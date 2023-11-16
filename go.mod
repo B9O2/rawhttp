@@ -1,4 +1,4 @@
-module github.com/projectdiscovery/rawhttp
+module github.com/B9O2/rawhttp
 
 go 1.18
 

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/projectdiscovery/rawhttp/client"
+	"github.com/B9O2/rawhttp/client"
 	urlutil "github.com/projectdiscovery/utils/url"
 )
 

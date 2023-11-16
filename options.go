@@ -3,8 +3,8 @@ package rawhttp
 import (
 	"time"
 
+	"github.com/B9O2/rawhttp/client"
 	"github.com/projectdiscovery/fastdialer/fastdialer"
-	"github.com/projectdiscovery/rawhttp/client"
 )
 
 // Options contains configuration options for rawhttp client

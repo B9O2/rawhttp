@@ -20,7 +20,7 @@ func getTestHttpServer(timeout time.Duration) *httptest.Server {
 	return ts
 }
 
-// run with go test -timeout 45s -run ^TestDialDefaultTimeout$ github.com/projectdiscovery/rawhttp
+// run with go test -timeout 45s -run ^TestDialDefaultTimeout$ github.com/B9O2/rawhttp
 func TestDialDefaultTimeout(t *testing.T) {
 	timeout := 30 * time.Second
 	ts := getTestHttpServer(45 * time.Second)

@@ -2,9 +2,9 @@
 
 [![License](https://img.shields.io/github/license/projectdiscovery/rawhttp)](LICENSE.md)
 ![Go version](https://img.shields.io/github/go-mod/go-version/projectdiscovery/rawhttp?filename=go.mod)
-[![Release](https://img.shields.io/github/release/projectdiscovery/rawhttp)](https://github.com/projectdiscovery/rawhttp/releases/)
-[![Checks](https://github.com/projectdiscovery/rawhttp/actions/workflows/build_test.yaml/badge.svg)](https://github.com/projectdiscovery/rawhttp/actions/workflows/build_test.yaml)
-[![GoDoc](https://img.shields.io/badge/go-reference-blue)](https://pkg.go.dev/github.com/projectdiscovery/rawhttp)
+[![Release](https://img.shields.io/github/release/projectdiscovery/rawhttp)](https://github.com/B9O2/rawhttp/releases/)
+[![Checks](https://github.com/B9O2/rawhttp/actions/workflows/build_test.yaml/badge.svg)](https://github.com/B9O2/rawhttp/actions/workflows/build_test.yaml)
+[![GoDoc](https://img.shields.io/badge/go-reference-blue)](https://pkg.go.dev/github.com/B9O2/rawhttp)
 
 rawhttp is a Go package for making HTTP requests in a raw way.
 
@@ -15,7 +15,7 @@ rawhttp is a Go package for making HTTP requests in a raw way.
 
 # Library Usage
 
-A simple example to get started with rawhttp is available at [examples](./example/simple/main.go). For documentation, please refer [godoc](https://pkg.go.dev/github.com/projectdiscovery/rawhttp)
+A simple example to get started with rawhttp is available at [examples](./example/simple/main.go). For documentation, please refer [godoc](https://pkg.go.dev/github.com/B9O2/rawhttp)
 
 ## Note
 
