@@ -13,7 +13,7 @@ import (
 	"github.com/projectdiscovery/fastdialer/fastdialer"
 )
 
-func HTTPDialer(proxyAddr string, timeout time.Duration) DialFunc {
+func HTTPDialer(proxyAddr string, timeout time.Duration, fd *fastdialer.Dialer) DialFunc {
 	return func(addr string) (net.Conn, error) {
 		var netConn net.Conn
 		var err error
@@ -33,8 +33,10 @@ func HTTPDialer(proxyAddr string, timeout time.Duration) DialFunc {
 			auth = base64.StdEncoding.EncodeToString([]byte(split[0]))
 			proxyAddr = split[1]
 		}
-		fd, err := fastdialer.NewDialer(fastdialer.DefaultOptions)
-		if err != nil {
+		if fd == nil {
+			fd, _ = fastdialer.NewDialer(fastdialer.DefaultOptions)
+		}
+		if fd == nil {
 			if timeout == 0 {
 				netConn, err = net.Dial("tcp", u.Host)
 			} else {
