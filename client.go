@@ -1,14 +1,13 @@
 package rawhttp
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/projectdiscovery/fastdialer/fastdialer"
-	"github.com/projectdiscovery/gologger"
 	retryablehttp "github.com/projectdiscovery/retryablehttp-go"
 	urlutil "github.com/projectdiscovery/utils/url"
 )
@@ -25,13 +24,15 @@ func NewClient(options *Options) *Client {
 		dialer:         new(dialer),
 		DefaultOptions: options,
 	}
-	if options.FastDialer == nil {
-		var err error
-		options.FastDialer, err = fastdialer.NewDialer(fastdialer.DefaultOptions)
-		if err != nil {
-			gologger.Error().Msgf("Could not create fast dialer: %s\n", err)
+	/*
+		if options.FastDialerOpts == nil {
+			var err error
+			options.FastDialerOpts, err = fastdialer.NewDialer(fastdialer.DefaultOptions)
+			if err != nil {
+				gologger.Error().Msgf("Could not create fast dialer: %s\n", err)
+			}
 		}
-	}
+	*/
 	return client
 }
 
@@ -92,9 +93,7 @@ func (c *Client) DoRawWithOptions(method, url, uripath string, headers map[strin
 
 // Close closes client and any resources it holds
 func (c *Client) Close() {
-	if c.DefaultOptions.FastDialer != nil {
-		c.DefaultOptions.FastDialer.Close()
-	}
+
 }
 
 func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) {
@@ -112,10 +111,18 @@ func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) 
 	return conn, err
 }
 
-func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (*http.Response, error) {
+func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (_ *http.Response, err error) {
 	options := c.DefaultOptions
 	if options != nil {
 		options = opts
+	}
+
+	if options.FastDialerOpts != nil && options.FastDialerOpts.Dialer != nil && options.FastDialerOpts.Dialer.LocalAddr == nil {
+		var err error
+		options.FastDialerOpts.Dialer.LocalAddr, err = GetLocalAddr(options.NetInterface)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	protocol := "http"
@@ -167,13 +174,21 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 	req.AutomaticHost = options.AutomaticHostHeader
 
 	conn, err := c.getConn(protocol, host, options)
-	if err != nil {
-		return nil, err
-	}
 
 	//middlewares
 	for _, m := range options.Middlewares {
-		m.Handle(req, conn)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = errors.New("Middleware Panic:" + fmt.Sprint(r))
+				}
+			}()
+			m.Handle(*options, req, conn)
+		}()
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	// set timeout if any
@@ -208,6 +223,7 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 			loc = fmt.Sprintf("%s://%s%s", protocol, host, loc)
 		}
 		redirectstatus.Current++
+		options.FastDialerOpts.Dialer.LocalAddr = nil
 		return c.do(method, loc, uripath, headers, body, redirectstatus, options)
 	}
 

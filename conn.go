@@ -68,7 +68,7 @@ func (d *dialer) DialWithProxy(protocol, addr, proxyURL string, timeout time.Dur
 	}
 	switch u.Scheme {
 	case "http":
-		c, err = proxy.HTTPDialer(proxyURL, timeout, options.FastDialer)(addr)
+		c, err = proxy.HTTPDialer(proxyURL, timeout, options.FastDialerOpts)(addr)
 	case "socks5", "socks5h": //todo: 有限支持，timeout无效
 		c, err = proxy.Socks5Dialer(proxyURL, timeout)(addr)
 	default:
@@ -101,10 +101,19 @@ func clientDial(protocol, addr string, timeout time.Duration, options *Options) 
 		ctx = context.Background()
 	}
 
+	fopts := options.FastDialerOpts
+	if fopts == nil {
+		fopts = &fastdialer.DefaultOptions
+	}
+	if timeout > 0 {
+		fopts.DialerTimeout = timeout
+	}
+	fd, _ := fastdialer.NewDialer(*fopts)
+
 	// http
 	if protocol == "http" {
-		if options.FastDialer != nil {
-			return options.FastDialer.Dial(ctx, "tcp", addr)
+		if options.FastDialerOpts != nil {
+			return fd.Dial(ctx, "tcp", addr)
 		} else if timeout > 0 {
 			return net.DialTimeout("tcp", addr, timeout)
 		}
@@ -117,27 +126,19 @@ func clientDial(protocol, addr string, timeout time.Duration, options *Options) 
 		tlsConfig.ServerName = options.SNI
 	}
 
-	if options.FastDialer == nil {
+	if fd == nil {
 		// always use fastdialer tls dial if available
-		opts := fastdialer.DefaultOptions
-		if timeout > 0 {
-			opts.DialerTimeout = timeout
-		}
-		var err error
-		options.FastDialer, err = fastdialer.NewDialer(opts)
 		// use net.Dialer if fastdialer tls dial is not available
-		if err != nil {
-			var dialer *net.Dialer
-			if timeout > 0 {
-				dialer = &net.Dialer{Timeout: timeout}
-			} else {
-				dialer = &net.Dialer{Timeout: 8 * time.Second} // should be more than enough
-			}
-			return tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		var dialer *net.Dialer
+		if timeout > 0 {
+			dialer = &net.Dialer{Timeout: timeout}
+		} else {
+			dialer = &net.Dialer{Timeout: 8 * time.Second} // should be more than enough
 		}
+		return tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
 	}
 
-	return options.FastDialer.DialTLS(ctx, "tcp", addr)
+	return fd.DialTLS(ctx, "tcp", addr)
 }
 
 // TlsHandshake tls handshake on a plain connection

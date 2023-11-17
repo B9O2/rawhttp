@@ -20,8 +20,11 @@ type Options struct {
 	Proxy                  string
 	ProxyDialTimeout       time.Duration
 	SNI                    string
-	Middlewares            []Middleware
-	FastDialer             *fastdialer.Dialer
+
+	//*
+	NetInterface   string
+	Middlewares    []Middleware
+	FastDialerOpts *fastdialer.Options
 }
 
 // DefaultOptions is the default configuration options for the client

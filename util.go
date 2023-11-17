@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -174,4 +175,69 @@ func DumpRequestRaw(method, url, uripath string, headers map[string][]string, bo
 	}
 
 	return []byte(strings.ReplaceAll(b.String(), "\n", client.NewLine)), nil
+}
+
+func GetFreePort() (int, error) {
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+func GetIPFromNetInterface(inter net.Interface) (string, bool) {
+	if (inter.Flags & net.FlagUp) != 0 {
+		addrs, _ := inter.Addrs()
+		for _, address := range addrs {
+			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				if ipnet.IP.To4() != nil {
+					return ipnet.IP.String(), true
+				}
+			}
+		}
+	}
+	return "127.0.0.1", false
+}
+
+func GetLocalIP(name string) string {
+
+	if name == "" {
+		netInterfaces, err := net.Interfaces()
+		if err != nil {
+			return "127.0.0.1"
+		}
+		for _, inter := range netInterfaces {
+			if res, ok := GetIPFromNetInterface(inter); ok {
+				return res
+			}
+		}
+	} else {
+		inter, err := net.InterfaceByName(name)
+		if err != nil {
+			return "127.0.0.1"
+		}
+		if res, ok := GetIPFromNetInterface(*inter); ok {
+			return res
+		}
+	}
+
+	return "127.0.0.1"
+}
+
+func GetLocalAddr(interName string) (*net.TCPAddr, error) {
+	if port, err := GetFreePort(); err != nil {
+		return nil, err
+	} else {
+		if addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", GetLocalIP(interName), port)); err != nil {
+			return nil, err
+		} else {
+			return addr, nil
+		}
+	}
 }
