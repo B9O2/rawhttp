@@ -20,6 +20,7 @@ type Options struct {
 	Proxy                  string
 	ProxyDialTimeout       time.Duration
 	SNI                    string
+	Middlewares            []Middleware
 	FastDialer             *fastdialer.Dialer
 }
 

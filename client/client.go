@@ -173,7 +173,7 @@ func (r *Response) ContentLength() int64 {
 			if err != nil {
 				continue
 			}
-			return int64(length)
+			return length
 		}
 	}
 	return -1

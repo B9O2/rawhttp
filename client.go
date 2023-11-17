@@ -15,25 +15,15 @@ import (
 
 // Client is a client for making raw http requests with go
 type Client struct {
-	dialer  Dialer
-	Options *Options
-}
-
-// AutomaticHostHeader sets Host header for requests automatically
-func AutomaticHostHeader(enable bool) {
-	DefaultClient.Options.AutomaticHostHeader = enable
-}
-
-// AutomaticContentLength performs automatic calculation of request content length.
-func AutomaticContentLength(enable bool) {
-	DefaultClient.Options.AutomaticContentLength = enable
+	dialer         Dialer
+	DefaultOptions *Options
 }
 
 // NewClient creates a new rawhttp client with provided options
 func NewClient(options *Options) *Client {
 	client := &Client{
-		dialer:  new(dialer),
-		Options: options,
+		dialer:         new(dialer),
+		DefaultOptions: options,
 	}
 	if options.FastDialer == nil {
 		var err error
@@ -86,31 +76,32 @@ func (c *Client) Dor(req *retryablehttp.Request) (*http.Response, error) {
 func (c *Client) DoRaw(method, url, uripath string, headers map[string][]string, body io.Reader) (*http.Response, error) {
 	redirectstatus := &RedirectStatus{
 		FollowRedirects: true,
-		MaxRedirects:    c.Options.MaxRedirects,
+		MaxRedirects:    c.DefaultOptions.MaxRedirects,
 	}
-	return c.do(method, url, uripath, headers, body, redirectstatus, c.Options)
+	return c.do(method, url, uripath, headers, body, redirectstatus, c.DefaultOptions)
 }
 
 // DoRawWithOptions performs a raw request with additional options
 func (c *Client) DoRawWithOptions(method, url, uripath string, headers map[string][]string, body io.Reader, options *Options) (*http.Response, error) {
 	redirectstatus := &RedirectStatus{
 		FollowRedirects: options.FollowRedirects,
-		MaxRedirects:    c.Options.MaxRedirects,
+		MaxRedirects:    c.DefaultOptions.MaxRedirects,
 	}
 	return c.do(method, url, uripath, headers, body, redirectstatus, options)
 }
 
 // Close closes client and any resources it holds
 func (c *Client) Close() {
-	if c.Options.FastDialer != nil {
-		c.Options.FastDialer.Close()
+	if c.DefaultOptions.FastDialer != nil {
+		c.DefaultOptions.FastDialer.Close()
 	}
 }
 
 func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) {
 	if options.Proxy != "" {
-		return c.dialer.DialWithProxy(protocol, host, c.Options.Proxy, c.Options.ProxyDialTimeout, options)
+		return c.dialer.DialWithProxy(protocol, host, options.Proxy, options.ProxyDialTimeout, options)
 	}
+
 	var conn Conn
 	var err error
 	if options.Timeout > 0 {
@@ -121,7 +112,12 @@ func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) 
 	return conn, err
 }
 
-func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, options *Options) (*http.Response, error) {
+func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (*http.Response, error) {
+	options := c.DefaultOptions
+	if options != nil {
+		options = opts
+	}
+
 	protocol := "http"
 	if strings.HasPrefix(strings.ToLower(url), "https://") {
 		protocol = "https"
@@ -166,14 +162,19 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 		protocol = "https"
 	}
 
+	req := toRequest(method, path, nil, headers, body, options)
+	req.AutomaticContentLength = options.AutomaticContentLength
+	req.AutomaticHost = options.AutomaticHostHeader
+
 	conn, err := c.getConn(protocol, host, options)
 	if err != nil {
 		return nil, err
 	}
 
-	req := toRequest(method, path, nil, headers, body, options)
-	req.AutomaticContentLength = options.AutomaticContentLength
-	req.AutomaticHost = options.AutomaticHostHeader
+	//middlewares
+	for _, m := range options.Middlewares {
+		m.Handle(req, conn)
+	}
 
 	// set timeout if any
 	if options.Timeout > 0 {
@@ -200,7 +201,10 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 			return nil, err
 		}
 		loc := headerValue(r.Header, "Location")
-		if strings.HasPrefix(loc, "/") {
+		if !strings.HasPrefix(loc, "http") {
+			if !strings.HasPrefix(loc, "/") {
+				loc = "/" + loc
+			}
 			loc = fmt.Sprintf("%s://%s%s", protocol, host, loc)
 		}
 		redirectstatus.Current++
