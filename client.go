@@ -173,8 +173,6 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 	req.AutomaticContentLength = options.AutomaticContentLength
 	req.AutomaticHost = options.AutomaticHostHeader
 
-	conn, err := c.getConn(protocol, host, options)
-
 	//middlewares
 	for _, m := range options.Middlewares {
 		func() {
@@ -183,10 +181,11 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 					err = errors.New("Middleware Panic:" + fmt.Sprint(r))
 				}
 			}()
-			m.Handle(*options, req, conn)
+			m.Handle(*options, req)
 		}()
 	}
 
+	conn, err := c.getConn(protocol, host, options)
 	if err != nil {
 		return nil, err
 	}
