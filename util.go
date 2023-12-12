@@ -3,6 +3,7 @@ package rawhttp
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -190,7 +191,6 @@ func GetFreePort() (int, error) {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
-
 func GetIPFromNetInterface(inter net.Interface) (string, bool) {
 	if (inter.Flags & net.FlagUp) != 0 {
 		addrs, _ := inter.Addrs()
@@ -205,36 +205,40 @@ func GetIPFromNetInterface(inter net.Interface) (string, bool) {
 	return "127.0.0.1", false
 }
 
-func GetLocalIP(name string) string {
+func GetLocalIP(interName string) (string, error) {
 
-	if name == "" {
+	if interName == "" {
 		netInterfaces, err := net.Interfaces()
 		if err != nil {
-			return "127.0.0.1"
+			return "127.0.0.1", err
 		}
 		for _, inter := range netInterfaces {
 			if res, ok := GetIPFromNetInterface(inter); ok {
-				return res
+				return res, nil
 			}
 		}
 	} else {
-		inter, err := net.InterfaceByName(name)
+		inter, err := net.InterfaceByName(interName)
 		if err != nil {
-			return "127.0.0.1"
+			return "127.0.0.1", err
 		}
 		if res, ok := GetIPFromNetInterface(*inter); ok {
-			return res
+			return res, nil
 		}
 	}
 
-	return "127.0.0.1"
+	return "127.0.0.1", errors.New("no available ip")
 }
 
 func GetLocalAddr(interName string) (*net.TCPAddr, error) {
 	if port, err := GetFreePort(); err != nil {
 		return nil, err
 	} else {
-		if addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", GetLocalIP(interName), port)); err != nil {
+		ip, err := GetLocalIP(interName)
+		if err != nil {
+			return nil, err
+		}
+		if addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%d", ip, port)); err != nil {
 			return nil, err
 		} else {
 			return addr, nil

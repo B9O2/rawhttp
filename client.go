@@ -3,12 +3,14 @@ package rawhttp
 import (
 	"errors"
 	"fmt"
+	"github.com/projectdiscovery/fastdialer/fastdialer"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	retryablehttp "github.com/projectdiscovery/retryablehttp-go"
+	"github.com/projectdiscovery/retryablehttp-go"
 	urlutil "github.com/projectdiscovery/utils/url"
 )
 
@@ -97,18 +99,19 @@ func (c *Client) Close() {
 }
 
 func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) {
+
 	if options.Proxy != "" {
 		return c.dialer.DialWithProxy(protocol, host, options.Proxy, options.ProxyDialTimeout, options)
 	}
 
-	var conn Conn
+	var connection Conn
 	var err error
 	if options.Timeout > 0 {
-		conn, err = c.dialer.DialTimeout(protocol, host, options.Timeout, options)
+		connection, err = c.dialer.DialTimeout(protocol, host, options.Timeout, options)
 	} else {
-		conn, err = c.dialer.Dial(protocol, host, options)
+		connection, err = c.dialer.Dial(protocol, host, options)
 	}
-	return conn, err
+	return connection, err
 }
 
 func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (_ *http.Response, err error) {
@@ -117,12 +120,8 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 		options = opts
 	}
 
-	if options.FastDialerOpts != nil && options.FastDialerOpts.Dialer != nil && options.FastDialerOpts.Dialer.LocalAddr == nil {
-		var err error
-		options.FastDialerOpts.Dialer.LocalAddr, err = GetLocalAddr(options.NetInterface)
-		if err != nil {
-			return nil, err
-		}
+	if options.FastDialerOpts == nil || options.FastDialerOpts.Dialer == nil {
+		options.FastDialerOpts = &fastdialer.DefaultOptions
 	}
 
 	protocol := "http"
@@ -139,6 +138,7 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 	}
 
 	host := u.Host
+
 	if options.AutomaticHostHeader {
 		// add automatic space
 		headers["Host"] = []string{fmt.Sprintf(" %s", host)}
@@ -173,7 +173,44 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 	req.AutomaticContentLength = options.AutomaticContentLength
 	req.AutomaticHost = options.AutomaticHostHeader
 
-	//middlewares
+	//Conn
+	var connection Conn
+	if options.FastDialerOpts.Dialer.LocalAddr == nil {
+		var netInterfaces []net.Interface
+		if len(options.NetInterface) > 0 {
+			inter, err := net.InterfaceByName(options.NetInterface)
+			if err != nil {
+				return nil, err
+			}
+			netInterfaces = []net.Interface{
+				*inter,
+			}
+		} else {
+			netInterfaces, err = net.Interfaces()
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		for _, inter := range netInterfaces {
+			options.FastDialerOpts.Dialer.LocalAddr, err = GetLocalAddr(inter.Name)
+			if err != nil {
+				continue
+			}
+			connection, err = c.getConn(protocol, host, options)
+			if err == nil {
+				break
+			}
+		}
+
+	} else {
+		connection, err = c.getConn(protocol, host, options)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	//Middlewares
 	for _, m := range options.Middlewares {
 		func() {
 			defer func() {
@@ -185,25 +222,20 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 		}()
 	}
 
-	conn, err := c.getConn(protocol, host, options)
-	if err != nil {
-		return nil, err
-	}
-
 	// set timeout if any
 	if options.Timeout > 0 {
-		_ = conn.SetDeadline(time.Now().Add(options.Timeout))
+		_ = connection.SetDeadline(time.Now().Add(options.Timeout))
 	}
 
-	if err := conn.WriteRequest(req); err != nil {
+	if err := connection.WriteRequest(req); err != nil {
 		return nil, err
 	}
-	resp, err := conn.ReadResponse(options.ForceReadAllBody)
+	resp, err := connection.ReadResponse(options.ForceReadAllBody)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := toHTTPResponse(conn, resp)
+	r, err := toHTTPResponse(connection, resp)
 	if err != nil {
 		return nil, err
 	}
