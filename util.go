@@ -28,7 +28,7 @@ type readCloser struct {
 	io.Closer
 }
 
-func toRequest(method string, path string, query []string, headers map[string][]string, body io.Reader, options *Options) *client.Request {
+func toRequest(method string, path string, query []string, version client.Version, headers map[string][]string, body io.Reader, options *Options) *client.Request {
 	if len(options.CustomRawBytes) > 0 {
 		return &client.Request{RawBytes: options.CustomRawBytes}
 	}
@@ -41,7 +41,7 @@ func toRequest(method string, path string, query []string, headers map[string][]
 		Method:  method,
 		Path:    path,
 		Query:   query,
-		Version: client.HTTP_1_1,
+		Version: version,
 		Headers: reqHeaders,
 		Body:    body,
 	}
@@ -108,7 +108,7 @@ func firstErr(err1, err2 error) error {
 }
 
 // DumpRequestRaw to string
-func DumpRequestRaw(method, url, uripath string, headers map[string][]string, body io.Reader, options *Options) ([]byte, error) {
+func DumpRequestRaw(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, options *Options) ([]byte, error) {
 	if len(options.CustomRawBytes) > 0 {
 		return options.CustomRawBytes, nil
 	}
@@ -140,7 +140,7 @@ func DumpRequestRaw(method, url, uripath string, headers map[string][]string, bo
 		path = uripath
 	}
 
-	req := toRequest(method, path, nil, headers, body, options)
+	req := toRequest(method, path, nil, version, headers, body, options)
 	b := strings.Builder{}
 
 	q := strings.Join(req.Query, "&")

@@ -3,14 +3,15 @@ package rawhttp
 import (
 	"errors"
 	"fmt"
+	"github.com/B9O2/rawhttp/client"
 	"github.com/projectdiscovery/fastdialer/fastdialer"
+	"github.com/projectdiscovery/retryablehttp-go"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/projectdiscovery/retryablehttp-go"
 	urlutil "github.com/projectdiscovery/utils/url"
 )
 
@@ -40,19 +41,19 @@ func NewClient(options *Options) *Client {
 
 // Head makes a HEAD request to a given URL
 func (c *Client) Head(url string) (*http.Response, error) {
-	return c.DoRaw("HEAD", url, "", nil, nil)
+	return c.DoRaw("HEAD", url, "", client.HTTP_1_1, nil, nil)
 }
 
 // Get makes a GET request to a given URL
 func (c *Client) Get(url string) (*http.Response, error) {
-	return c.DoRaw("GET", url, "", nil, nil)
+	return c.DoRaw("GET", url, "", client.HTTP_1_1, nil, nil)
 }
 
 // Post makes a POST request to a given URL
 func (c *Client) Post(url string, mimetype string, body io.Reader) (*http.Response, error) {
 	headers := make(map[string][]string)
 	headers["Content-Type"] = []string{mimetype}
-	return c.DoRaw("POST", url, "", headers, body)
+	return c.DoRaw("POST", url, "", client.HTTP_1_1, headers, body)
 }
 
 // Do sends a http request and returns a response
@@ -61,8 +62,12 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	headers := req.Header
 	url := req.URL.String()
 	body := req.Body
+	version := client.Version{
+		Major: req.ProtoMajor,
+		Minor: req.ProtoMinor,
+	}
 
-	return c.DoRaw(method, url, "", headers, body)
+	return c.DoRaw(method, url, "", version, headers, body)
 }
 
 // Dor sends a retryablehttp request and returns the response
@@ -71,26 +76,30 @@ func (c *Client) Dor(req *retryablehttp.Request) (*http.Response, error) {
 	headers := req.Header
 	url := req.URL.String()
 	body := req.Body
+	version := client.Version{
+		Major: req.ProtoMajor,
+		Minor: req.ProtoMinor,
+	}
 
-	return c.DoRaw(method, url, "", headers, body)
+	return c.DoRaw(method, url, "", version, headers, body)
 }
 
 // DoRaw does a raw request with some configuration
-func (c *Client) DoRaw(method, url, uripath string, headers map[string][]string, body io.Reader) (*http.Response, error) {
+func (c *Client) DoRaw(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader) (*http.Response, error) {
 	redirectstatus := &RedirectStatus{
 		FollowRedirects: true,
 		MaxRedirects:    c.DefaultOptions.MaxRedirects,
 	}
-	return c.do(method, url, uripath, headers, body, redirectstatus, c.DefaultOptions)
+	return c.do(method, url, uripath, version, headers, body, redirectstatus, c.DefaultOptions)
 }
 
 // DoRawWithOptions performs a raw request with additional options
-func (c *Client) DoRawWithOptions(method, url, uripath string, headers map[string][]string, body io.Reader, options *Options) (*http.Response, error) {
+func (c *Client) DoRawWithOptions(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, options *Options) (*http.Response, error) {
 	redirectstatus := &RedirectStatus{
 		FollowRedirects: options.FollowRedirects,
 		MaxRedirects:    c.DefaultOptions.MaxRedirects,
 	}
-	return c.do(method, url, uripath, headers, body, redirectstatus, options)
+	return c.do(method, url, uripath, version, headers, body, redirectstatus, options)
 }
 
 // Close closes client and any resources it holds
@@ -114,7 +123,7 @@ func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) 
 	return connection, err
 }
 
-func (c *Client) do(method, url, uripath string, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (_ *http.Response, err error) {
+func (c *Client) do(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (_ *http.Response, err error) {
 	options := c.DefaultOptions
 	if options != nil {
 		options = opts
@@ -169,7 +178,7 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 		protocol = "https"
 	}
 
-	req := toRequest(method, path, nil, headers, body, options)
+	req := toRequest(method, path, nil, version, headers, body, options)
 	req.AutomaticContentLength = options.AutomaticContentLength
 	req.AutomaticHost = options.AutomaticHostHeader
 
@@ -255,7 +264,7 @@ func (c *Client) do(method, url, uripath string, headers map[string][]string, bo
 		}
 		redirectstatus.Current++
 		options.FastDialerOpts.Dialer.LocalAddr = nil
-		return c.do(method, loc, uripath, headers, body, redirectstatus, options)
+		return c.do(method, loc, uripath, version, headers, body, redirectstatus, options)
 	}
 
 	return r, err
