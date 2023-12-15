@@ -86,7 +86,7 @@ type client struct {
 	writer
 }
 
-// SendRequest marshalls a HTTP request to the wire.
+// WriteRequest marshalls a HTTP request to the wire.
 func (c *client) WriteRequest(req *Request) error {
 	if len(req.RawBytes) > 0 {
 		_, err := c.Write(req.RawBytes)
