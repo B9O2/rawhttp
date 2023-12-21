@@ -3,6 +3,7 @@ package rawhttp
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,10 +20,10 @@ import (
 // Dialer can dial a remote HTTP server.
 type Dialer interface {
 	// Dial dials a remote http server returning a Conn.
-	Dial(protocol, addr string, options *Options) (Conn, error)
-	DialWithProxy(protocol, addr, proxyURL string, timeout time.Duration, options *Options) (Conn, error)
+	Dial(protocol, addr string, options Options, fd *fastdialer.Dialer) (Conn, error)
+	DialWithProxy(protocol, addr, proxyURL string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (Conn, error)
 	// Dial dials a remote http server with timeout returning a Conn.
-	DialTimeout(protocol, addr string, timeout time.Duration, options *Options) (Conn, error)
+	DialTimeout(protocol, addr string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (Conn, error)
 }
 
 type dialer struct {
@@ -30,15 +31,15 @@ type dialer struct {
 	conns      map[string][]Conn // maps addr to a, possibly empty, slice of existing Conns
 }
 
-func (d *dialer) Dial(protocol, addr string, options *Options) (Conn, error) {
-	return d.dialTimeout(protocol, addr, 0, options)
+func (d *dialer) Dial(protocol, addr string, options Options, fd *fastdialer.Dialer) (Conn, error) {
+	return d.dialTimeout(protocol, addr, 0, options, fd)
 }
 
-func (d *dialer) DialTimeout(protocol, addr string, timeout time.Duration, options *Options) (Conn, error) {
-	return d.dialTimeout(protocol, addr, timeout, options)
+func (d *dialer) DialTimeout(protocol, addr string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (Conn, error) {
+	return d.dialTimeout(protocol, addr, timeout, options, fd)
 }
 
-func (d *dialer) dialTimeout(protocol, addr string, timeout time.Duration, options *Options) (Conn, error) {
+func (d *dialer) dialTimeout(protocol, addr string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (Conn, error) {
 	d.Lock()
 	if d.conns == nil {
 		d.conns = make(map[string][]Conn)
@@ -52,15 +53,14 @@ func (d *dialer) dialTimeout(protocol, addr string, timeout time.Duration, optio
 		}
 	}
 	d.Unlock()
-	c, err := clientDial(protocol, addr, timeout, options)
-	return &conn{
-		Client: client.NewClient(c),
-		Conn:   c,
-		dialer: d,
-	}, err
+	c, err := clientDial(protocol, addr, timeout, options, fd)
+	if err != nil {
+		return nil, err
+	}
+	return NewBaseConn(c, client.NewClient(c), d)
 }
 
-func (d *dialer) DialWithProxy(protocol, addr, proxyURL string, timeout time.Duration, options *Options) (Conn, error) {
+func (d *dialer) DialWithProxy(protocol, addr, proxyURL string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (Conn, error) {
 	var c net.Conn
 	u, err := url.Parse(proxyURL)
 	if err != nil {
@@ -68,7 +68,7 @@ func (d *dialer) DialWithProxy(protocol, addr, proxyURL string, timeout time.Dur
 	}
 	switch u.Scheme {
 	case "http":
-		c, err = proxy.HTTPDialer(proxyURL, timeout, options.FastDialerOpts)(addr)
+		c, err = proxy.HTTPDialer(proxyURL, timeout, fd)(addr)
 	case "socks5", "socks5h": //todo: 有限支持，timeout无效
 		c, err = proxy.Socks5Dialer(proxyURL, timeout)(addr)
 	default:
@@ -82,14 +82,11 @@ func (d *dialer) DialWithProxy(protocol, addr, proxyURL string, timeout time.Dur
 			return nil, fmt.Errorf("tls handshake error: %w", err)
 		}
 	}
-	return &conn{
-		Client: client.NewClient(c),
-		Conn:   c,
-		dialer: d,
-	}, err
+
+	return NewBaseConn(c, client.NewClient(c), d)
 }
 
-func clientDial(protocol, addr string, timeout time.Duration, options *Options) (net.Conn, error) {
+func clientDial(protocol, addr string, timeout time.Duration, options Options, fd *fastdialer.Dialer) (net.Conn, error) {
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc
@@ -101,19 +98,14 @@ func clientDial(protocol, addr string, timeout time.Duration, options *Options) 
 		ctx = context.Background()
 	}
 
-	fopts := options.FastDialerOpts
-	if fopts == nil {
-		fopts = &fastdialer.DefaultOptions
-	}
-	if timeout > 0 {
-		fopts.DialerTimeout = timeout
-	}
-	fd, _ := fastdialer.NewDialer(*fopts)
-
 	// http
 	if protocol == "http" {
-		if options.FastDialerOpts != nil {
-			return fd.Dial(ctx, "tcp", addr)
+		if fd != nil {
+			conn, err := fd.Dial(ctx, "tcp", addr)
+			if err != nil {
+				return nil, err
+			}
+			return conn, nil
 		} else if timeout > 0 {
 			return net.DialTimeout("tcp", addr, timeout)
 		}
@@ -181,15 +173,26 @@ type Conn interface {
 	Release()
 }
 
-type conn struct {
-	client.Client
+type BaseConn struct {
 	net.Conn
-	*dialer
+	client.Client
+	dialer *dialer
 }
 
-func (c *conn) Release() {
+func (c *BaseConn) Release() {
 	c.dialer.Lock()
 	defer c.dialer.Unlock()
 	addr := c.Conn.RemoteAddr().String()
 	c.dialer.conns[addr] = append(c.dialer.conns[addr], c)
+}
+
+func NewBaseConn(conn net.Conn, c client.Client, d *dialer) (*BaseConn, error) {
+	if conn == nil || c == nil {
+		return nil, errors.New("conn or client is nil")
+	}
+	return &BaseConn{
+		conn,
+		c,
+		d,
+	}, nil
 }

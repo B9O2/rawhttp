@@ -5,13 +5,13 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"github.com/B9O2/NStruct/Shield"
+	"github.com/B9O2/rawhttp/client"
+	urlutil "github.com/projectdiscovery/utils/url"
 	"io"
 	"net"
 	"net/http"
 	"strings"
-
-	"github.com/B9O2/rawhttp/client"
-	urlutil "github.com/projectdiscovery/utils/url"
 )
 
 // StatusError is a HTTP status error object
@@ -178,7 +178,12 @@ func DumpRequestRaw(method, url, uripath string, version client.Version, headers
 	return []byte(strings.ReplaceAll(b.String(), "\n", client.NewLine)), nil
 }
 
-func GetFreePort() (int, error) {
+type LocalAddrManager struct {
+	s    *Shield.Shield
+	used map[int]bool
+}
+
+func (lam *LocalAddrManager) AllocatePort() (port int, err error) {
 	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
 	if err != nil {
 		return 0, err
@@ -191,50 +196,55 @@ func GetFreePort() (int, error) {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
-func GetIPFromNetInterface(inter net.Interface) (string, bool) {
+
+func (lam *LocalAddrManager) FreePort(port int) {
+	lam.used[port] = false
+}
+
+func (lam *LocalAddrManager) GetIPFromNetInterface(inter net.Interface) (net.IP, bool) {
 	if (inter.Flags & net.FlagUp) != 0 {
 		addrs, _ := inter.Addrs()
 		for _, address := range addrs {
 			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
 				if ipnet.IP.To4() != nil {
-					return ipnet.IP.String(), true
+					return ipnet.IP, true
 				}
 			}
 		}
 	}
-	return "127.0.0.1", false
+	return net.ParseIP("127.0.0.1"), false
 }
 
-func GetLocalIP(interName string) (string, error) {
+func (lam *LocalAddrManager) GetLocalIP(interName string) (net.IP, error) {
 
 	if interName == "" {
 		netInterfaces, err := net.Interfaces()
 		if err != nil {
-			return "127.0.0.1", err
+			return net.ParseIP("127.0.0.1"), err
 		}
 		for _, inter := range netInterfaces {
-			if res, ok := GetIPFromNetInterface(inter); ok {
+			if res, ok := lam.GetIPFromNetInterface(inter); ok {
 				return res, nil
 			}
 		}
 	} else {
 		inter, err := net.InterfaceByName(interName)
 		if err != nil {
-			return "127.0.0.1", err
+			return net.ParseIP("127.0.0.1"), err
 		}
-		if res, ok := GetIPFromNetInterface(*inter); ok {
+		if res, ok := lam.GetIPFromNetInterface(*inter); ok {
 			return res, nil
 		}
 	}
 
-	return "127.0.0.1", errors.New("no available ip")
+	return net.ParseIP("127.0.0.1"), errors.New("no available ip")
 }
 
-func GetLocalAddr(interName string) (*net.TCPAddr, error) {
-	if port, err := GetFreePort(); err != nil {
+func (lam *LocalAddrManager) GetLocalAddr(interName string) (*net.TCPAddr, error) {
+	if port, err := lam.AllocatePort(); err != nil {
 		return nil, err
 	} else {
-		ip, err := GetLocalIP(interName)
+		ip, err := lam.GetLocalIP(interName)
 		if err != nil {
 			return nil, err
 		}
@@ -243,5 +253,16 @@ func GetLocalAddr(interName string) (*net.TCPAddr, error) {
 		} else {
 			return addr, nil
 		}
+	}
+}
+
+func (lam *LocalAddrManager) Close() {
+	lam.s.Close()
+}
+
+func NewLocalAddrManager() *LocalAddrManager {
+	return &LocalAddrManager{
+		s:    Shield.NewShield(),
+		used: make(map[int]bool),
 	}
 }

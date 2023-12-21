@@ -3,6 +3,7 @@ module github.com/B9O2/rawhttp
 go 1.18
 
 require (
+	github.com/B9O2/NStruct v0.0.5
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/projectdiscovery/fastdialer v0.0.44
 	github.com/projectdiscovery/gologger v1.1.11

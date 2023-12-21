@@ -18,13 +18,15 @@ import (
 // Client is a client for making raw http requests with go
 type Client struct {
 	dialer         Dialer
-	DefaultOptions *Options
+	lam            *LocalAddrManager
+	DefaultOptions Options
 }
 
 // NewClient creates a new rawhttp client with provided options
-func NewClient(options *Options) *Client {
+func NewClient(options Options) *Client {
 	client := &Client{
 		dialer:         new(dialer),
+		lam:            NewLocalAddrManager(),
 		DefaultOptions: options,
 	}
 	/*
@@ -94,7 +96,7 @@ func (c *Client) DoRaw(method, url, uripath string, version client.Version, head
 }
 
 // DoRawWithOptions performs a raw request with additional options
-func (c *Client) DoRawWithOptions(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, options *Options) (*http.Response, error) {
+func (c *Client) DoRawWithOptions(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, options Options) (*http.Response, error) {
 	redirectstatus := &RedirectStatus{
 		FollowRedirects: options.FollowRedirects,
 		MaxRedirects:    c.DefaultOptions.MaxRedirects,
@@ -107,31 +109,33 @@ func (c *Client) Close() {
 
 }
 
-func (c *Client) getConn(protocol, host string, options *Options) (Conn, error) {
+func (c *Client) getConn(protocol, host string, options Options, fd *fastdialer.Dialer) (Conn, error) {
 
 	if options.Proxy != "" {
-		return c.dialer.DialWithProxy(protocol, host, options.Proxy, options.ProxyDialTimeout, options)
+		return c.dialer.DialWithProxy(protocol, host, options.Proxy, options.ProxyDialTimeout, options, fd)
 	}
 
-	var connection Conn
+	var conn Conn
 	var err error
 	if options.Timeout > 0 {
-		connection, err = c.dialer.DialTimeout(protocol, host, options.Timeout, options)
+		conn, err = c.dialer.DialTimeout(protocol, host, options.Timeout, options, fd)
 	} else {
-		connection, err = c.dialer.Dial(protocol, host, options)
+		conn, err = c.dialer.Dial(protocol, host, options, fd)
 	}
-	return connection, err
+
+	return conn, err
 }
 
-func (c *Client) do(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, opts *Options) (_ *http.Response, err error) {
-	options := c.DefaultOptions
-	if options != nil {
-		options = opts
-	}
-
-	if options.FastDialerOpts == nil || options.FastDialerOpts.Dialer == nil {
-		options.FastDialerOpts = &fastdialer.DefaultOptions
-	}
+func (c *Client) do(method, url, uripath string, version client.Version, headers map[string][]string, body io.Reader, redirectstatus *RedirectStatus, options Options) (_ *http.Response, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("rawhttp panic:" + fmt.Sprint(r))
+			return
+		}
+		if err != nil {
+			err = errors.New("rawhttp error:" + err.Error())
+		}
+	}()
 
 	protocol := "http"
 	if strings.HasPrefix(strings.ToLower(url), "https://") {
@@ -178,13 +182,23 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 		protocol = "https"
 	}
 
-	req := toRequest(method, path, nil, version, headers, body, options)
+	req := toRequest(method, path, nil, version, headers, body, &options)
 	req.AutomaticContentLength = options.AutomaticContentLength
 	req.AutomaticHost = options.AutomaticHostHeader
 
+	//Fastdialer
+	fdopts := fastdialer.DefaultOptions
+	fdopts.Dialer = &net.Dialer{
+		Timeout:  options.Timeout,
+		Resolver: net.DefaultResolver,
+	}
+	fdopts.Dialer.Control = options.Control
+
 	//Conn
+	var fd *fastdialer.Dialer
 	var connection Conn
-	if options.FastDialerOpts.Dialer.LocalAddr == nil {
+	var localAddr *net.TCPAddr
+	if options.LocalAddr == nil {
 		var netInterfaces []net.Interface
 		if len(options.NetInterface) > 0 {
 			inter, err := net.InterfaceByName(options.NetInterface)
@@ -202,22 +216,37 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 		}
 
 		for _, inter := range netInterfaces {
-			options.FastDialerOpts.Dialer.LocalAddr, err = GetLocalAddr(inter.Name)
-			if err != nil {
-				continue
-			}
-			connection, err = c.getConn(protocol, host, options)
+			localAddr, err = c.lam.GetLocalAddr(inter.Name)
 			if err == nil {
-				break
+				fdopts.Dialer.LocalAddr = localAddr
+				fd, err = fastdialer.NewDialer(fdopts)
+				if err != nil {
+					return nil, err
+				}
+				connection, err = c.getConn(protocol, host, options, fd)
+				if err == nil {
+					break
+				}
 			}
 		}
 
 	} else {
-		connection, err = c.getConn(protocol, host, options)
+		fd, err = fastdialer.NewDialer(fdopts)
 		if err != nil {
 			return nil, err
 		}
+		connection, err = c.getConn(protocol, host, options, fd)
 	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if connection != nil {
+			connection.Close()
+		}
+	}()
 
 	//Middlewares
 	for _, m := range options.Middlewares {
@@ -227,16 +256,26 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 					err = errors.New("Middleware Panic:" + fmt.Sprint(r))
 				}
 			}()
-			m.Handle(*options, req)
+			m.Handle(options, fdopts, req)
 		}()
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	// set timeout if any
 	if options.Timeout > 0 {
-		_ = connection.SetDeadline(time.Now().Add(options.Timeout))
+		t := time.Now().Add(options.Timeout)
+		if connection != nil {
+			err = connection.SetDeadline(t)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 	}
 
-	if err := connection.WriteRequest(req); err != nil {
+	if err = connection.WriteRequest(req); err != nil {
 		return nil, err
 	}
 	resp, err := connection.ReadResponse(options.ForceReadAllBody)
@@ -263,7 +302,6 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 			loc = fmt.Sprintf("%s://%s%s", protocol, host, loc)
 		}
 		redirectstatus.Current++
-		options.FastDialerOpts.Dialer.LocalAddr = nil
 		return c.do(method, loc, uripath, version, headers, body, redirectstatus, options)
 	}
 

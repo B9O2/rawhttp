@@ -1,10 +1,11 @@
 package rawhttp
 
 import (
+	"net"
+	"syscall"
 	"time"
 
 	"github.com/B9O2/rawhttp/client"
-	"github.com/projectdiscovery/fastdialer/fastdialer"
 )
 
 // Options contains configuration options for rawhttp client
@@ -22,13 +23,15 @@ type Options struct {
 	SNI                    string
 
 	//*
-	NetInterface   string
-	Middlewares    []Middleware
-	FastDialerOpts *fastdialer.Options
+	NetInterface  string
+	Middlewares   []Middleware
+	LocalAddr     *net.TCPAddr
+	BaseResolvers []string
+	Control       func(network string, address string, c syscall.RawConn) error
 }
 
 // DefaultOptions is the default configuration options for the client
-var DefaultOptions = &Options{
+var DefaultOptions = Options{
 	Timeout:                30 * time.Second,
 	FollowRedirects:        true,
 	MaxRedirects:           10,

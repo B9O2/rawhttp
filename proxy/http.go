@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -13,8 +14,9 @@ import (
 	"github.com/projectdiscovery/fastdialer/fastdialer"
 )
 
-func HTTPDialer(proxyAddr string, timeout time.Duration, fopts *fastdialer.Options) DialFunc {
+func HTTPDialer(proxyAddr string, timeout time.Duration, fd *fastdialer.Dialer) DialFunc {
 	return func(addr string) (net.Conn, error) {
+		fd := fd
 		var netConn net.Conn
 		var err error
 		var auth string
@@ -33,23 +35,15 @@ func HTTPDialer(proxyAddr string, timeout time.Duration, fopts *fastdialer.Optio
 			auth = base64.StdEncoding.EncodeToString([]byte(split[0]))
 			proxyAddr = split[1]
 		}
-		if fopts == nil {
-			fopts = &fastdialer.DefaultOptions
-		}
-		fd, err := fastdialer.NewDialer(*fopts)
-		if err != nil {
-			if timeout == 0 {
-				netConn, err = net.Dial("tcp", u.Host)
-			} else {
-				netConn, err = net.DialTimeout("tcp", u.Host, timeout)
+		if fd != nil {
+			netConn, err = fd.Dial(context.TODO(), "tcp", u.Host)
+			if err != nil {
+				return nil, err
 			}
 		} else {
-			netConn, err = fd.Dial(context.TODO(), "tcp", u.Host)
+			return nil, errors.New("fastdialer is nil")
 		}
 
-		if err != nil {
-			return nil, err
-		}
 		conn := client.NewClient(netConn)
 
 		req := "CONNECT " + addr + " HTTP/1.1\r\n"
