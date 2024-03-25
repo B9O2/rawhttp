@@ -3,14 +3,15 @@ package rawhttp
 import (
 	"errors"
 	"fmt"
-	"github.com/B9O2/rawhttp/client"
-	"github.com/projectdiscovery/fastdialer/fastdialer"
-	"github.com/projectdiscovery/retryablehttp-go"
 	"io"
 	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/B9O2/rawhttp/client"
+	"github.com/projectdiscovery/fastdialer/fastdialer"
+	"github.com/projectdiscovery/retryablehttp-go"
 
 	urlutil "github.com/projectdiscovery/utils/url"
 )
@@ -242,12 +243,6 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 		return nil, err
 	}
 
-	defer func() {
-		if connection != nil {
-			connection.Close()
-		}
-	}()
-
 	//Middlewares
 	for _, m := range options.Middlewares {
 		func() {
@@ -304,7 +299,6 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 		redirectstatus.Current++
 		return c.do(method, loc, uripath, version, headers, body, redirectstatus, options)
 	}
-
 	return r, err
 }
 

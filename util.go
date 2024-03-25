@@ -5,13 +5,14 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
-	"github.com/B9O2/NStruct/Shield"
-	"github.com/B9O2/rawhttp/client"
-	urlutil "github.com/projectdiscovery/utils/url"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/B9O2/NStruct/Shield"
+	"github.com/B9O2/rawhttp/client"
+	urlutil "github.com/projectdiscovery/utils/url"
 )
 
 // StatusError is a HTTP status error object
@@ -65,7 +66,7 @@ func toHTTPResponse(conn Conn, resp *client.Response) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	rc := &readCloser{rbody, conn}
+	rc := readCloser{rbody, conn}
 
 	r.Body = rc
 

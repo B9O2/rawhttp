@@ -28,7 +28,7 @@ func TestDialDefaultTimeout(t *testing.T) {
 	defer ts.Close()
 
 	startTime := time.Now()
-	client := NewClient(*DefaultOptions)
+	client := NewClient(DefaultOptions)
 	_, err := client.DoRaw("GET", ts.URL, "/rawhttp", client2.HTTP_1_1, nil, nil)
 	if !stringsutil.ContainsAny(err.Error(), "i/o timeout") || time.Now().Before(startTime.Add(timeout)) {
 		t.Error("default timeout error")
@@ -41,10 +41,10 @@ func TestDialWithCustomTimeout(t *testing.T) {
 	defer ts.Close()
 
 	startTime := time.Now()
-	client := NewClient(*DefaultOptions)
+	client := NewClient(DefaultOptions)
 	options := DefaultOptions
 	options.Timeout = timeout
-	_, err := client.DoRawWithOptions("GET", ts.URL, "/rawhttp", client2.HTTP_1_1, nil, nil, *options)
+	_, err := client.DoRawWithOptions("GET", ts.URL, "/rawhttp", client2.HTTP_1_1, nil, nil, options)
 	if !stringsutil.ContainsAny(err.Error(), "i/o timeout") || time.Now().Before(startTime.Add(timeout)) {
 		t.Error("custom timeout error")
 	}
