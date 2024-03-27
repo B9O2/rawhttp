@@ -196,6 +196,7 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 	fdopts.Dialer.Control = options.Control
 
 	//Conn
+	var errMsgs []string
 	var fd *fastdialer.Dialer
 	var connection Conn
 	var localAddr *net.TCPAddr
@@ -225,7 +226,9 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 					return nil, err
 				}
 				connection, err = c.getConn(protocol, host, options, fd)
-				if err == nil {
+				if err != nil {
+					errMsgs = append(errMsgs, localAddr.String()+"::"+err.Error())
+				} else {
 					break
 				}
 			}
@@ -240,6 +243,9 @@ func (c *Client) do(method, url, uripath string, version client.Version, headers
 	}
 
 	if err != nil {
+		if len(errMsgs) > 0 {
+			err = errors.New(err.Error() + ":" + strings.Join(errMsgs, ";"))
+		}
 		return nil, err
 	}
 
